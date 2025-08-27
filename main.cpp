@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
 
 		{ //(2) call the current mode's "update" function to deal with elapsed time:
 			auto current_time = std::chrono::high_resolution_clock::now();
-			static auto previous_time = current_time;
+			static auto previous_time = current_time; // static: put this into global storage; same as if it were outside the function, in the gloabl scope; //?? why do we want this 
 			float elapsed = std::chrono::duration< float >(current_time - previous_time).count();
 			previous_time = current_time;
 
