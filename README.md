@@ -1,8 +1,9 @@
 # (TODO: your game's title)
 
-Author: (TODO: your name)
+Author: Cheyu Tu
 
 Design: (TODO: In two sentences or fewer, describe what is new and interesting about your game.)
+A vampire must navigate through 7 steps to reach a cup of blood while avoiding 5 lights that shine in a fixed sequence. If the vampire is caught in any light, they fail.
 
 Screen Shot:
 
