@@ -11,6 +11,15 @@
 #include <random>
 
 // Credit: Used ChatGPT for assistance
+struct DoorInstance { int8_t x; int8_t y; uint8_t index; uint8_t attributes; };
+static std::vector<DoorInstance> g_door_sprites;
+
+// door tile indices (filled in constructor after uploading door tiles)
+static uint8_t s_door_up_red    = 0;
+static uint8_t s_door_down_red  = 0;
+static uint8_t s_door_up_grey   = 0;
+static uint8_t s_door_down_grey = 0;
+
 PlayMode::PlayMode() {
     // --- 1) Define palettes from your hex colors ---
 
@@ -38,17 +47,7 @@ PlayMode::PlayMode() {
 		glm::u8vec4(0x64,0x13,0x16,0xff)  // 3
 	};
 
-    // // Obstacle palette (index 0 transparent; 4th slot duplicated):
-    // // Obstacles: 7e1f23, 5f6268, transparent
-    // std::array<glm::u8vec4,4> obst_palette_rgba = {
-    //     glm::u8vec4(0x00,0x00,0x00,0x00), // 0 transparent
-    //     glm::u8vec4(0x7e,0x1f,0x23,0xff), // 1
-    //     glm::u8vec4(0x5f,0x62,0x68,0xff), // 2
-    //     glm::u8vec4(0x5f,0x62,0x68,0xff)  // 3 (duplicate, unused filler)
-    // };
-
     // --- 2) Pack three tilesheets, PNG -> PPU ---
-
     auto bg_packed = Sprites::pack_png_tileset(
         data_path("assets/bg_tiles.png"),
         bg_palette_rgba
@@ -70,11 +69,6 @@ PlayMode::PlayMode() {
 	// 	data_path("assets/char_tiles.png"), char1_palette_rgba, /*tile_x=*/0, /*tile_y=*/0, /*flip_y=*/true);
 	// PPU466::Tile char2 = Sprites::pack_png_single_tile(
 	// 	data_path("assets/char_tiles.png"), char2_palette_rgba, /*tile_x=*/1, /*tile_y=*/0, /*flip_y=*/true);
-
-    // auto obst_packed = Sprites::pack_png_tileset(
-    //     data_path("assets/obst_tiles.png"),
-    //     obst_palette_rgba
-    // );
 
     // --- 3) Upload into fixed tile table ranges ---
     //    Should truncate for Game1 if there are. >256 tiles.
@@ -125,12 +119,6 @@ PlayMode::PlayMode() {
 	ppu.palette_table[5][2] = char2_palette_rgba[2];
 	ppu.palette_table[5][3] = char2_palette_rgba[3];
 
-    // // Obstacles -> palette slot 6:
-    // ppu.palette_table[6][0] = obst_palette_rgba[0];
-    // ppu.palette_table[6][1] = obst_palette_rgba[1];
-    // ppu.palette_table[6][2] = obst_palette_rgba[2];
-    // ppu.palette_table[6][3] = obst_palette_rgba[3];
-
     // --- 5) Static background ---
     for (uint32_t y = 0; y < PPU466::BackgroundHeight; ++y) {
         for (uint32_t x = 0; x < PPU466::BackgroundWidth; ++x) {
@@ -173,23 +161,25 @@ PlayMode::PlayMode() {
 		ppu.background[RIGHT_COL + PPU466::BackgroundWidth * y] = wall_tile_index;
 	}
 
-	// ---- fill the "10th" and "20th" rows, counted from the TOP ----
-	// (You originally described them as human "10th"/"20th" from the top.)
-	auto row_from_top = [&](uint32_t top_index)->std::optional<uint32_t>{
-		if (top_index >= VISIBLE_H) return std::nullopt;
-		return VISIBLE_H - 1 - top_index; // convert "top row index" -> bottom-left origin
+	// ---- fill rows counted from TOP, using 1-based "row1" ----
+	// y index for a top-left "row1" (1..VISIBLE_H):
+	auto y_from_top_row1 = [&](uint32_t row1)->std::optional<uint32_t>{
+		if (row1 == 0 || row1 > VISIBLE_H) return std::nullopt;
+		return (VISIBLE_H - row1); // row1=1 -> top row (VISIBLE_H-1), row1=VISIBLE_H -> 0
 	};
 
-	if (auto y10 = row_from_top(10); y10) {
+	// rows 10 and 20 from the TOP (1-based):
+	if (auto y10 = y_from_top_row1(10); y10) {
 		for (uint32_t x = 0; x < VISIBLE_W; ++x) {
 			ppu.background[x + PPU466::BackgroundWidth * *y10] = wall_tile_index;
 		}
 	}
-	if (auto y20 = row_from_top(20); y20) {
+	if (auto y20 = y_from_top_row1(20); y20) {
 		for (uint32_t x = 0; x < VISIBLE_W; ++x) {
 			ppu.background[x + PPU466::BackgroundWidth * *y20] = wall_tile_index;
 		}
 	}
+
 
     // Optional background color (kept from your version):
     ppu.background_color = glm::u8vec4(0x11,0x0a,0x18,0xff);
@@ -205,6 +195,76 @@ PlayMode::PlayMode() {
 
 		player_at.x = float(start_x);
 		player_at.y = float(start_y);
+	}
+
+	// -------- Doors: four 8x8 tiles with shared palette: transparent, 7e1f23, 5f6268 --------
+	std::array<glm::u8vec4,4> door_palette_rgba = {
+		glm::u8vec4(0x00,0x00,0x00,0x00), // 0 transparent
+		glm::u8vec4(0x7e,0x1f,0x23,0xff), // 1 red   (#7e1f23)
+		glm::u8vec4(0x5f,0x62,0x68,0xff), // 2 grey  (#5f6268)
+		glm::u8vec4(0x5f,0x62,0x68,0xff)  // 3 duplicate (unused filler)
+	};
+
+	// load the 4 door tiles; assumes each file is a single 8x8 PNG
+	PPU466::Tile door_up_red   = Sprites::pack_png_single_tile(data_path("assets/door_up_red.png"),   door_palette_rgba, 0, 0, /*flip_y=*/true);
+	PPU466::Tile door_down_red = Sprites::pack_png_single_tile(data_path("assets/door_down_red.png"), door_palette_rgba, 0, 0, /*flip_y=*/true);
+	PPU466::Tile door_up_grey  = Sprites::pack_png_single_tile(data_path("assets/door_up_grey.png"),  door_palette_rgba, 0, 0, /*flip_y=*/true);
+	PPU466::Tile door_down_grey= Sprites::pack_png_single_tile(data_path("assets/door_down_grey.png"),door_palette_rgba, 0, 0, /*flip_y=*/true);
+
+	// upload into safe tile slots (doesn't collide with your bases 1,10,20)
+	const size_t door_tile_base = 30;
+
+	ppu.tile_table[door_tile_base + 0] = door_up_red;
+	ppu.tile_table[door_tile_base + 1] = door_down_red;
+	ppu.tile_table[door_tile_base + 2] = door_up_grey;
+	ppu.tile_table[door_tile_base + 3] = door_down_grey;
+
+	// put the door colors in palette slot 6 (independent of BG palette 0)
+	ppu.palette_table[6][0] = door_palette_rgba[0];
+	ppu.palette_table[6][1] = door_palette_rgba[1];
+	ppu.palette_table[6][2] = door_palette_rgba[2];
+	ppu.palette_table[6][3] = door_palette_rgba[3];
+
+	// ---- Precompute sprite positions for doors (row/col start at 1, counted from TOP-LEFT) ----
+	{
+		const uint32_t VISIBLE_H = PPU466::ScreenHeight / 8;
+
+		auto add_door_row = [&](uint8_t tile_index, int row1, int col_start1, int col_end1) {
+			// convert top-left (row1) to bottom-left pixel y:
+			int y_pixels = int((VISIBLE_H - row1) * 8);
+			for (int c = col_start1; c <= col_end1; ++c) {
+				int x_pixels = (c - 1) * 8;
+				g_door_sprites.push_back(DoorInstance{
+					int8_t(x_pixels), int8_t(y_pixels),
+					tile_index, /*attributes=*/6 // palette slot 6, in front (no behind bit)
+				});
+			}
+		};
+
+		// remember door tile indices for collision/trigger logic:
+		s_door_up_red    = uint8_t(door_tile_base + 0);
+		s_door_down_red  = uint8_t(door_tile_base + 1);
+		s_door_up_grey   = uint8_t(door_tile_base + 2);
+		s_door_down_grey = uint8_t(door_tile_base + 3);
+
+		// more door placements (rows/cols 1-based, from TOP-LEFT):
+		// door_up_red: row 9 col 6-9, row 9 col 16-19, row 19 col 9-12
+		add_door_row(s_door_up_red,   /*row*/9,  /*c0*/6,  /*c1*/9);
+		add_door_row(s_door_up_red,   /*row*/9,  /*c0*/16, /*c1*/19);
+		add_door_row(s_door_up_red,   /*row*/19, /*c0*/9,  /*c1*/12);
+
+		// door_up_grey: row 9 col 26-29, row 19 col 21-24
+		add_door_row(s_door_up_grey,  /*row*/9,  /*c0*/26, /*c1*/29);
+		add_door_row(s_door_up_grey,  /*row*/19, /*c0*/21, /*c1*/24);
+
+		// door_down_red: row 11 col 16-19, row 11 col 26-29, row 19 col 21-24
+		add_door_row(s_door_down_red, /*row*/11, /*c0*/16, /*c1*/19);
+		add_door_row(s_door_down_red, /*row*/11, /*c0*/26, /*c1*/29);
+		add_door_row(s_door_down_red, /*row*/21, /*c0*/21, /*c1*/24);
+
+		// door_down_grey: row 11 col 6-9, row 19 col 9-12
+		add_door_row(s_door_down_grey,/*row*/11, /*c0*/6,  /*c1*/9);
+		add_door_row(s_door_down_grey,/*row*/21, /*c0*/9,  /*c1*/12);
 	}
 }
 
@@ -353,6 +413,46 @@ void PlayMode::update(float elapsed) {
 
     // reset button press counters (keep your original behavior):
     left.downs = right.downs = up.downs = down.downs = 0;
+
+	// ---- door triggers: touching a door moves the player ±3 rows (from TOP-LEFT semantics) ----
+	{
+		constexpr int TileSize = 8;
+		const int VISIBLE_H = int(PPU466::ScreenHeight / TileSize);
+
+		// player AABB (8x8) at current position:
+		int px0 = int(std::floor(player_at.x));
+		int py0 = int(std::floor(player_at.y));
+		int px1 = px0 + TileSize;
+		int py1 = py0 + TileSize;
+
+		auto aabb_overlap = [&](int ax0,int ay0,int ax1,int ay1, int bx0,int by0,int bx1,int by1)->bool{
+			return (ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0);
+		};
+
+		// check overlap with any door sprite (each 8x8)
+		for (const auto& d : g_door_sprites) {
+			int dx0 = int(d.x), dy0 = int(d.y);
+			int dx1 = dx0 + TileSize, dy1 = dy0 + TileSize;
+			if (!aabb_overlap(px0,py0,px1,py1, dx0,dy0,dx1,dy1)) continue;
+
+			// touching a door: change row by ±3 (1 row = 8 px). TOP-LEFT counting means:
+			// row += 3  -> move downward in pixels -> y -= 24
+			// row -= 3  -> move upward   in pixels -> y += 24
+			if (d.index == s_door_up_red || d.index == s_door_up_grey) {
+				player_at.y -= 3 * TileSize;
+			} else if (d.index == s_door_down_red || d.index == s_door_down_grey) {
+				player_at.y += 3 * TileSize;
+			}
+
+			// clamp to visible vertical range (keep fully on-screen)
+			if (player_at.y < 0.0f) player_at.y = 0.0f;
+			float maxY = float((VISIBLE_H - 1) * TileSize);
+			if (player_at.y > maxY) player_at.y = maxY;
+
+			// stop after the first door we touch this frame
+			break;
+		}
+	}
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
@@ -369,15 +469,21 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	ppu.sprites[0].index = 10;     // first character tile
 	ppu.sprites[0].attributes = 7; // character palette
 
-	// //some other misc sprites:
-	// for (uint32_t i = 1; i < 63; ++i) {
-	// 	float amt = (i + 2.0f * background_fade) / 62.0f;
-	// 	ppu.sprites[i].x = int8_t(0.5f * float(PPU466::ScreenWidth) + std::cos( 2.0f * M_PI * amt * 5.0f + 0.01f * player_at.x) * 0.4f * float(PPU466::ScreenWidth));
-	// 	ppu.sprites[i].y = int8_t(0.5f * float(PPU466::ScreenHeight) + std::sin( 2.0f * M_PI * amt * 3.0f + 0.01f * player_at.y) * 0.4f * float(PPU466::ScreenWidth));
-	// 	ppu.sprites[i].index = 64;
-	// 	ppu.sprites[i].attributes = 6;
-	// 	if (i % 2) ppu.sprites[i].attributes |= 0x80; //'behind' bit
-	// }
+	// draw door sprites starting at hardware sprite slot 1:
+	{
+		const size_t base_slot = 1;
+		const size_t max_slots = 63; // PPU has 64 hardware sprites (0..63)
+		const size_t count = std::min(g_door_sprites.size(), max_slots - base_slot);
+
+		for (size_t i = 0; i < count; ++i) {
+			const auto &d = g_door_sprites[i];
+			ppu.sprites[base_slot + i].x = d.x;
+			ppu.sprites[base_slot + i].y = d.y;
+			ppu.sprites[base_slot + i].index = d.index;
+			ppu.sprites[base_slot + i].attributes = d.attributes;
+		}
+		// (optional) clear any remaining sprite slots if you previously used them
+	}
 
 	//--- actually draw ---
 	ppu.draw(drawable_size);
