@@ -11,7 +11,18 @@
 #include <random>
 
 // Credit: Used ChatGPT for assistance
-struct DoorInstance { int x; int y; uint8_t index; uint8_t attributes; };
+enum class DoorColor { Grey, Red };
+
+struct DoorInstance {
+    int x;
+    int y;
+    uint8_t index;
+    uint8_t attributes;
+    DoorColor self_color;
+    DoorColor paired_color;
+    bool is_up; // true = up door, false = down door
+};
+
 static std::vector<DoorInstance> g_door_sprites;
 
 // door tile indices (filled in constructor after uploading door tiles)
@@ -241,14 +252,16 @@ PlayMode::PlayMode() {
 	{
 		const uint32_t VISIBLE_H = PPU466::ScreenHeight / 8;
 
-		auto add_door_row = [&](uint8_t tile_index, int row1, int col_start1, int col_end1) {
-			// convert top-left (row1) to bottom-left pixel y:
+		auto add_door_row = [&](uint8_t tile_index,
+								int row1, int col_start1, int col_end1,
+								DoorColor self, DoorColor paired, bool is_up) {
 			int y_pixels = int((VISIBLE_H - row1) * 8);
 			for (int c = col_start1; c <= col_end1; ++c) {
 				int x_pixels = (c - 1) * 8;
 				g_door_sprites.push_back(DoorInstance{
 					x_pixels, y_pixels,
-					tile_index, /*attributes=*/6
+					tile_index, /*attributes=*/6,
+					self, paired, is_up
 				});
 			}
 		};
@@ -259,24 +272,23 @@ PlayMode::PlayMode() {
 		s_door_up_grey   = uint8_t(door_tile_base + 2);
 		s_door_down_grey = uint8_t(door_tile_base + 3);
 
-		// more door placements (rows/cols 1-based, from TOP-LEFT):
 		// door_up_red: row 9 col 6-9, row 9 col 16-19, row 19 col 9-12
-		add_door_row(s_door_up_red,   /*row*/9,  /*c0*/6,  /*c1*/9);
-		add_door_row(s_door_up_red,   /*row*/9,  /*c0*/16, /*c1*/19);
-		add_door_row(s_door_up_red,   /*row*/19, /*c0*/9,  /*c1*/12);
+		add_door_row(s_door_up_red, 9, 6, 9, DoorColor::Red, DoorColor::Grey, true);
+		add_door_row(s_door_up_red, 9, 16, 19, DoorColor::Red, DoorColor::Red, true);
+		add_door_row(s_door_up_red, 19, 9, 12, DoorColor::Red, DoorColor::Grey, true);
 
 		// door_up_grey: row 9 col 26-29, row 19 col 21-24
-		add_door_row(s_door_up_grey,  /*row*/9,  /*c0*/26, /*c1*/29);
-		add_door_row(s_door_up_grey,  /*row*/19, /*c0*/21, /*c1*/24);
+		add_door_row(s_door_up_grey, 9, 26, 29, DoorColor::Grey, DoorColor::Red, true);
+		add_door_row(s_door_up_grey, 19, 21, 24, DoorColor::Grey, DoorColor::Red, true);
 
-		// door_down_red: row 11 col 16-19, row 11 col 26-29, row 19 col 21-24
-		add_door_row(s_door_down_red, /*row*/11, /*c0*/16, /*c1*/19);
-		add_door_row(s_door_down_red, /*row*/11, /*c0*/26, /*c1*/29);
-		add_door_row(s_door_down_red, /*row*/21, /*c0*/21, /*c1*/24);
+		// door_down_red: row 11 col 16-19, row 11 col 26-29, row 21 col 21-24
+		add_door_row(s_door_down_red, 11, 16, 19, DoorColor::Red, DoorColor::Red, false);
+		add_door_row(s_door_down_red, 11, 26, 29, DoorColor::Red, DoorColor::Grey, false);
+		add_door_row(s_door_down_red, 21, 21, 24, DoorColor::Red, DoorColor::Grey, false);
 
-		// door_down_grey: row 11 col 6-9, row 19 col 9-12
-		add_door_row(s_door_down_grey,/*row*/11, /*c0*/6,  /*c1*/9);
-		add_door_row(s_door_down_grey,/*row*/21, /*c0*/9,  /*c1*/12);
+		// door_down_grey: row 11 col 6-9, row 21 col 9-12
+		add_door_row(s_door_down_grey, 11, 6, 9, DoorColor::Grey, DoorColor::Red, false);
+		add_door_row(s_door_down_grey, 21, 9, 12, DoorColor::Grey, DoorColor::Red, false);
 	}
 }
 
@@ -326,7 +338,7 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 }
 
 void PlayMode::update(float elapsed) {
-    constexpr float PlayerSpeed = 60.0f;
+    constexpr float PlayerSpeed = 90.0f;
     constexpr int   TileSize    = 8;
 
     // desired motion this frame:
@@ -388,7 +400,7 @@ void PlayMode::update(float elapsed) {
             }
         }
         player_at.x = new_x;
-		printf("player_at.x after collision: %f\n", player_at.x);
+		// printf("player_at.x after collision: %f\n", player_at.x);
     }
 
     // --- move along Y, then resolve collisions ---
@@ -420,7 +432,7 @@ void PlayMode::update(float elapsed) {
             }
         }
         player_at.y = new_y;
-		printf("player_at.y after collision: %f\n", player_at.y);
+		// printf("player_at.y after collision: %f\n", player_at.y);
     }
 
     // reset button press counters (keep your original behavior):
@@ -429,44 +441,42 @@ void PlayMode::update(float elapsed) {
 	// ---- door triggers: touching a door moves the player ±3 rows (from TOP-LEFT semantics) ----
 	{
 		constexpr int TileSize = 8;
-		const int VISIBLE_H = int(PPU466::ScreenHeight / TileSize);
-
-		// player AABB (8x8) at current position:
-		int px0 = int(std::floor(player_at.x));
-		int py0 = int(std::floor(player_at.y));
-		int px1 = px0 + TileSize;
-		int py1 = py0 + TileSize;
-
-		auto aabb_overlap = [&](int ax0,int ay0,int ax1,int ay1, int bx0,int by0,int bx1,int by1)->bool{
-			return (ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0);
-		};
-
 		// check overlap with any door sprite (each 8x8)
-		for (const auto& d : g_door_sprites) {
-			int dx0 = int(d.x), dy0 = int(d.y);
-			int dx1 = dx0 + TileSize, dy1 = dy0 + TileSize;
-			if (!aabb_overlap(px0,py0,px1,py1, dx0,dy0,dx1,dy1)) {
-				printf("player is at (%d, %d), no overlap with door at (%d,%d)\n", px0, py0, int(d.x), int(d.y));
-				continue;
+		for (auto const &door : g_door_sprites) {
+			bool overlap = (player_at.x < door.x + TileSize &&
+							player_at.x + TileSize > door.x &&
+							player_at.y < door.y + TileSize &&
+							player_at.y + TileSize > door.y);
+
+			if (!overlap) continue;
+
+			// check if player's current color matches this door's self color
+			PlayerColor as_player_color = (player_color == PlayerColor::Grey) ? PlayerColor::Grey : PlayerColor::Red;
+			DoorColor as_door_self = door.self_color;
+
+			if ((as_player_color == PlayerColor::Grey && as_door_self == DoorColor::Grey) ||
+				(as_player_color == PlayerColor::Red && as_door_self == DoorColor::Red)) {
+
+				// move ±3 rows depending on up/down
+				if (door.is_up) {
+					printf("Triggering UP door at (%d,%d)\n", door.x, door.y);
+					player_at.y -= 4 * TileSize;
+				} else {
+					printf("Triggering DOWN door at (%d,%d)\n", door.x, door.y);
+					player_at.y += 4 * TileSize;
+				}
+
+				// change to the paired door’s color
+				if (door.paired_color == DoorColor::Grey) {
+					player_color = PlayerColor::Grey;
+					printf("Player color changed to GREY\n");
+				} else {
+					printf("Player color changed to RED\n");
+					player_color = PlayerColor::Red;
+				}
+
+				break; // only trigger one door per frame
 			}
-			printf("player (%d %d) TOUCHING door at (%d,%d) tile index %d\n", px0, py0, int(d.x), int(d.y), int(d.index));
-
-			// touching a door: change row by ±3 (1 row = 8 px). TOP-LEFT counting means:
-			// row += 3  -> move downward in pixels -> y -= 24
-			// row -= 3  -> move upward   in pixels -> y += 24
-			if (d.index == s_door_up_red || d.index == s_door_up_grey) {
-				player_at.y -= 3 * TileSize;
-			} else if (d.index == s_door_down_red || d.index == s_door_down_grey) {
-				player_at.y += 3 * TileSize;
-			}
-
-			// clamp to visible vertical range (keep fully on-screen)
-			if (player_at.y < 0.0f) player_at.y = 0.0f;
-			float maxY = float((VISIBLE_H - 1) * TileSize);
-			if (player_at.y > maxY) player_at.y = maxY;
-
-			// stop after the first door we touch this frame
-			break;
 		}
 	}
 }
