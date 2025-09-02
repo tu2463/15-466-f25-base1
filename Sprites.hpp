@@ -51,6 +51,15 @@ struct Sprites {
         std::array<glm::u8vec4,4> palette;             // single 4-color palette you used
         uint16_t tiles_w = 0, tiles_h = 0;             // width/height in 8×8 tiles
     };
+
     static Packed pack_png_tileset(std::string const &png_path,
-                                   std::array<glm::u8vec4,4> const &palette_rgba);
+                                 std::array<glm::u8vec4,4> const &palette_rgba,
+                                 bool flip_y = false);
+
+    // Pack exactly one 8x8 tile from a PNG using the given 4-color palette.
+    // (tile_x, tile_y) are in tile coordinates; flip_y handles upside-down sprites.
+    static PPU466::Tile pack_png_single_tile(std::string const &png_path,
+                                            std::array<glm::u8vec4,4> const &palette_rgba,
+                                            uint16_t tile_x, uint16_t tile_y,
+                                            bool flip_y = false);
 };
