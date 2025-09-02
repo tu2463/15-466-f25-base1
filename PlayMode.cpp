@@ -376,7 +376,7 @@ void PlayMode::update(float elapsed) {
             }
         }
         player_at.x = new_x;
-		// printf("player_at.x after collision: %f\n", player_at.x);
+		printf("player_at.x after collision: %f\n", player_at.x);
     }
 
     // --- move along Y, then resolve collisions ---
@@ -408,7 +408,7 @@ void PlayMode::update(float elapsed) {
             }
         }
         player_at.y = new_y;
-		// printf("player_at.y after collision: %f\n", player_at.y);
+		printf("player_at.y after collision: %f\n", player_at.y);
     }
 
     // reset button press counters (keep your original behavior):
@@ -433,7 +433,11 @@ void PlayMode::update(float elapsed) {
 		for (const auto& d : g_door_sprites) {
 			int dx0 = int(d.x), dy0 = int(d.y);
 			int dx1 = dx0 + TileSize, dy1 = dy0 + TileSize;
-			if (!aabb_overlap(px0,py0,px1,py1, dx0,dy0,dx1,dy1)) continue;
+			if (!aabb_overlap(px0,py0,px1,py1, dx0,dy0,dx1,dy1)) {
+				printf("player is at (%d, %d), no overlap with door at (%d,%d)\n", px0, py0, int(d.x), int(d.y));
+				continue;
+			}
+			printf("player (%d %d) TOUCHING door at (%d,%d) tile index %d\n", px0, py0, int(d.x), int(d.y), int(d.index));
 
 			// touching a door: change row by ±3 (1 row = 8 px). TOP-LEFT counting means:
 			// row += 3  -> move downward in pixels -> y -= 24
