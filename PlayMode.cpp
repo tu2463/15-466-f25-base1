@@ -19,8 +19,13 @@ static uint8_t s_door_up_red    = 0;
 static uint8_t s_door_down_red  = 0;
 static uint8_t s_door_up_grey   = 0;
 static uint8_t s_door_down_grey = 0;
-static uint8_t s_char_red_idx = 0;       // will be set in the constructor
-static uint8_t s_char_red_palette = 5;   // your red character palette slot
+static uint8_t s_char_grey_idx = 0;
+static uint8_t s_char_grey_palette = 7;
+static uint8_t s_char_red_idx = 0;
+static uint8_t s_char_red_palette = 5;
+
+enum class PlayerColor { Grey, Red };
+static PlayerColor player_color = PlayerColor::Grey;  // default starting state
 
 PlayMode::PlayMode() {
     // --- 1) Define palettes from your hex colors ---
@@ -75,9 +80,16 @@ PlayMode::PlayMode() {
     // --- 3) Upload into fixed tile table ranges ---
     //    Should truncate for Game1 if there are. >256 tiles.
     const size_t bg_tile_base   = 1;
-    const size_t char1_tile_base = 10;
-    const size_t char2_tile_base = 20;
-    // const size_t obst_tile_base = 64;
+
+	// after uploading char1 (grey) tiles:
+	const size_t char1_tile_base = 10;
+	s_char_grey_idx = uint8_t(char1_tile_base + 0);
+	s_char_grey_palette = 7;
+
+	// after uploading char2 (red) tiles:
+	const size_t char2_tile_base = 20;
+	s_char_red_idx = uint8_t(char2_tile_base + 0);
+	s_char_red_palette = 5;
 
 	// calculates the number of tiles to copy into tile_table, ensuring it does not exceed the size of tile_table
     const size_t bg_copy_count   = std::min(bg_packed.tiles.size(),   ppu.tile_table.size() - bg_tile_base);
@@ -87,11 +99,6 @@ PlayMode::PlayMode() {
     for (size_t i = 0; i < bg_copy_count;   ++i) ppu.tile_table[bg_tile_base   + i] = bg_packed.tiles[i];
     for (size_t i = 0; i < char1_copy_count;   ++i) ppu.tile_table[char1_tile_base   + i] = char1_packed.tiles[i];
     for (size_t i = 0; i < char2_copy_count;   ++i) ppu.tile_table[char2_tile_base   + i] = char2_packed.tiles[i];
-	
-	// first red character tile from the red sheet:
-	s_char_red_idx = uint8_t(char2_tile_base + 0);
-	// palette for that red character:
-	s_char_red_palette = 5;
 
 	// make tile 0 be a fully transparent tile (so solid background color shows):
     PPU466::Tile blank{};
@@ -473,10 +480,17 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
     ppu.background_position.y = 0;
 
 	//player sprite:
-	ppu.sprites[0].x = int8_t(int(player_at.x + 0.5f));
-	ppu.sprites[0].y = int8_t(int(player_at.y + 0.5f));
-	ppu.sprites[0].index = 10;     // first character tile
-	ppu.sprites[0].attributes = 7; // character palette
+	{
+		const size_t player_slot = 0;
+
+		uint8_t idx = (player_color == PlayerColor::Grey) ? s_char_grey_idx : s_char_red_idx;
+		uint8_t pal = (player_color == PlayerColor::Grey) ? s_char_grey_palette : s_char_red_palette;
+
+		ppu.sprites[player_slot].x = int8_t(int(player_at.x));
+		ppu.sprites[player_slot].y = int8_t(int(player_at.y));
+		ppu.sprites[player_slot].index = idx;
+		ppu.sprites[player_slot].attributes = pal;
+	}
 
 	// draw door sprites starting at hardware sprite slot 1:
 	{
@@ -494,7 +508,7 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		// (optional) clear any remaining sprite slots if you previously used them
 	}
 
-	// add a red character sprite at the bottom, centered:
+	// target red character sprite
 	{
 		// use the last hardware sprite slot to avoid colliding with doors (0 is player, 1.. are doors)
 		const size_t red_char_slot = 63;

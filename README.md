@@ -32,7 +32,7 @@ The player uses a character tile and is drawn from a live player_at position eac
 WIP:
 - If the player is grey and touches the grey side of door, they will be moved to the other side (by modifying row by ±3) and changed sprite to use char_red_tiles.png
 - If the player is red and touches the red side of door, they will be moved to the other side (by modifying row by ±3) and changed sprite to use char_grey_tiles.png
-- If the player color is different from a side of the door, nothing will happen whe they collide.
+- If the player color is different from a side of the door, nothing will happen when they collide.
 - A target (some red characters (dist/assets/char_red_tiles.png) should be put at the bottom of the map). When player is red and reaches them, game success.
 
 Source files: they are in dist/assets
