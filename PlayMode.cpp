@@ -11,7 +11,7 @@
 #include <random>
 
 // Credit: Used ChatGPT for assistance
-struct DoorInstance { int8_t x; int8_t y; uint8_t index; uint8_t attributes; };
+struct DoorInstance { int x; int y; uint8_t index; uint8_t attributes; };
 static std::vector<DoorInstance> g_door_sprites;
 
 // door tile indices (filled in constructor after uploading door tiles)
@@ -240,8 +240,8 @@ PlayMode::PlayMode() {
 			for (int c = col_start1; c <= col_end1; ++c) {
 				int x_pixels = (c - 1) * 8;
 				g_door_sprites.push_back(DoorInstance{
-					int8_t(x_pixels), int8_t(y_pixels),
-					tile_index, /*attributes=*/6 // palette slot 6, in front (no behind bit)
+					x_pixels, y_pixels,
+					tile_index, /*attributes=*/6
 				});
 			}
 		};
@@ -485,11 +485,11 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		const size_t count = std::min(g_door_sprites.size(), max_slots - base_slot);
 
 		for (size_t i = 0; i < count; ++i) {
-			const auto &d = g_door_sprites[i];
-			ppu.sprites[base_slot + i].x = d.x;
-			ppu.sprites[base_slot + i].y = d.y;
-			ppu.sprites[base_slot + i].index = d.index;
-			ppu.sprites[base_slot + i].attributes = d.attributes;
+			ppu.sprites[base_slot + i].x = int8_t(g_door_sprites[i].x);
+			ppu.sprites[base_slot + i].y = int8_t(g_door_sprites[i].y);
+			ppu.sprites[base_slot + i].index = g_door_sprites[i].index;
+			ppu.sprites[base_slot + i].attributes = g_door_sprites[i].attributes;
+
 		}
 		// (optional) clear any remaining sprite slots if you previously used them
 	}
