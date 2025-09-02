@@ -7,7 +7,7 @@ A grey little creature wants to turn red and join the red creature friend group.
 
 Screen Shot:
 
-![Screen Shot](screenshot.png)
+![Game Screenshot](dist/assets/screenshot.png)
 
 How Your Asset Pipeline Works:
 
@@ -28,6 +28,12 @@ Clear ppu.background to tile 0 so the solid background_color shows, then place w
 
 5. Place sprites for player and props (doors):
 The player uses a character tile and is drawn from a live player_at position each frame. Doors are loaded as single 8×8 tiles, assigned a shared palette, and placed as sprites at specified (row, col) locations (1-based, from top-left). Door overlap triggers row±3 movement; solid-tile collision comes from the background map (non-zero tiles are solid). 
+
+WIP:
+- If the player is grey and touches the grey side of door, they will be moved to the other side (by modifying row by ±3) and changed sprite to use char_red_tiles.png
+- If the player is red and touches the red side of door, they will be moved to the other side (by modifying row by ±3) and changed sprite to use char_grey_tiles.png
+- If the player color is different from a side of the door, nothing will happen whe they collide.
+- A target (some red characters (dist/assets/char_red_tiles.png) should be put at the bottom of the map). When player is red and reaches them, game success.
 
 Source files: they are in dist/assets
 
