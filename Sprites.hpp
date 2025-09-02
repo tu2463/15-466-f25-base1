@@ -1,5 +1,5 @@
 // Sprites.hpp
-// Used ChatGPT for assistance
+// Credit: Used ChatGPT for assistance
 #pragma once
 #include <cstdint>
 #include <string>
@@ -42,7 +42,9 @@ struct Sprites {
     static Sprites load(std::string const &filename);
 
     // Lightweight “packer” that slices an RGBA PNG tilesheet into PPU tiles.
-    // Assumptions: (a) image size is multiples of 8, (b) each tile uses <=4 distinct colors,
+    // Assumptions: 
+    // (a) image size is multiples of 8, 
+    // (b) each tile uses <=4 distinct colors ("transparency" counts as a color),
     // (c) colors must match exactly one of the 4 entries you pass in 'palette'.
     struct Packed {
         std::vector<PPU466::Tile> tiles;               // packed 2-bit tiles
