@@ -108,61 +108,146 @@
 
 // Credit: Used ChatGPT for assistance
 PlayMode::PlayMode() {
-    // 1) Define the 4-color palette your PNG actually uses:
-    //    Order matters: indices 0..3 become PPU color slots 0..3.
-    std::array<glm::u8vec4,4> my_palette = {
-        glm::u8vec4(0,   0,   0,   0x00), // index 0: transparent (alpha=0) or solid bg if you want
-        glm::u8vec4(0x7f,0x7f,0x7f,0xff), // index 1: mid gray
-        glm::u8vec4(0xff,0xff,0xff,0xff), // index 2: white
-        glm::u8vec4(0x00,0xa0,0xff,0xff), // index 3: blue
+    // --- 1) Define palettes from your hex colors ---
+
+    // Background palette (no transparency needed; duplicate one color as the 4th slot):
+    // BG: 301e21, 463537, 110a18
+    std::array<glm::u8vec4,4> bg_palette_rgba = {
+        glm::u8vec4(0x00,0x00,0x00,0x00), // 0 = transparent (lets background_color show)
+        glm::u8vec4(0x30,0x1e,0x21,0xff), // 1
+        glm::u8vec4(0x46,0x35,0x37,0xff), // 2
+        glm::u8vec4(0x11,0x0a,0x18,0xff)  // 3
     };
 
-    // 2) Pack PNG -> PPU tiles:
-    auto packed = Sprites::pack_png_tileset(
-        data_path("assets/tileset.png"), // lives under dist/assets/
-        my_palette
+    // // Character palette (index 0 must be transparent for sprites):
+    // // Characters: 110a18, 5f6268, 7e1f23, transparent
+    // std::array<glm::u8vec4,4> char_palette_rgba = {
+    //     glm::u8vec4(0x00,0x00,0x00,0x00), // 0 transparent
+    //     glm::u8vec4(0x11,0x0a,0x18,0xff), // 1
+    //     glm::u8vec4(0x5f,0x62,0x68,0xff), // 2
+    //     glm::u8vec4(0x7e,0x1f,0x23,0xff)  // 3
+    // };
+
+    // // Obstacle palette (index 0 transparent; 4th slot duplicated):
+    // // Obstacles: 7e1f23, 5f6268, transparent
+    // std::array<glm::u8vec4,4> obst_palette_rgba = {
+    //     glm::u8vec4(0x00,0x00,0x00,0x00), // 0 transparent
+    //     glm::u8vec4(0x7e,0x1f,0x23,0xff), // 1
+    //     glm::u8vec4(0x5f,0x62,0x68,0xff), // 2
+    //     glm::u8vec4(0x5f,0x62,0x68,0xff)  // 3 (duplicate, unused filler)
+    // };
+
+    // --- 2) Pack three tilesheets, PNG -> PPU ---
+
+    auto bg_packed = Sprites::pack_png_tileset(
+        data_path("assets/bg_tiles.png"),
+        bg_palette_rgba
     );
 
-    // 3) Upload tiles into the fixed tile table (starting at 0).
+    // auto char_packed = Sprites::pack_png_tileset(
+    //     data_path("assets/char_tiles.png"),
+    //     char_palette_rgba
+    // );
+
+    // auto obst_packed = Sprites::pack_png_tileset(
+    //     data_path("assets/obst_tiles.png"),
+    //     obst_palette_rgba
+    // );
+
+    // --- 3) Upload into fixed tile table ranges (0, 32, 64) ---
     //    Should truncate for Game1 if there are. >256 tiles.
+    const size_t bg_tile_base   = 1; // walls begin at tile index 1 (tile 0 will be blank)
+    const size_t char_tile_base = 32; // keep 32 so draw() can continue using index=32
+    // const size_t obst_tile_base = 64;
 
 	// calculates the number of tiles to copy into tile_table, ensuring it does not exceed the size of tile_table
-    const size_t tiles_copy_count = std::min(packed.tiles.size(), size_t(ppu.tile_table.size()));
-    for (size_t i = 0; i < tiles_copy_count; ++i) {
-        ppu.tile_table[i] = packed.tiles[i];
-    }
+    const size_t bg_copy_count   = std::min(bg_packed.tiles.size(),   ppu.tile_table.size() - bg_tile_base);
+    // const size_t char_copy_count = std::min(char_packed.tiles.size(), ppu.tile_table.size() - char_tile_base);
+    // const size_t obst_copy_count = std::min(obst_packed.tiles.size(), ppu.tile_table.size() - obst_tile_base);
 
-    // 4) Upload palette to a slot you’ll use (e.g., slot 0 for BG, 7 for player):
+    for (size_t i = 0; i < bg_copy_count;   ++i) ppu.tile_table[bg_tile_base   + i] = bg_packed.tiles[i];
+    // for (size_t i = 0; i < char_copy_count; ++i) ppu.tile_table[char_tile_base + i] = char_packed.tiles[i];
+    // for (size_t i = 0; i < obst_copy_count; ++i) ppu.tile_table[obst_tile_base + i] = obst_packed.tiles[i];
+
+	// make tile 0 be a fully transparent tile (so solid background color shows):
+    PPU466::Tile blank{};
+    for (int r = 0; r < 8; ++r) { blank.bit0[r] = 0; blank.bit1[r] = 0; }
+    ppu.tile_table[0] = blank;
+
+    // --- 4) Install palettes into PPU slots (BG=0, Characters=7, Obstacles=6) ---
 	// NOTE that packed.palette is exactly the same as my_palette, refer to the pack_png_tileset function - is it correct?
 	/* from PPU466.hpp:
 	typedef std::array< glm::u8vec4, 4 > Palette;
 	std::array< Palette, 8 > palette_table; */
-	auto &bg_palette = ppu.palette_table[0];
-	bg_palette[0] = packed.palette[0];
-	bg_palette[1] = packed.palette[1];
-	bg_palette[2] = packed.palette[2];
-	bg_palette[3] = packed.palette[3];
 
-    ppu.palette_table[7] = ppu.palette_table[0]; // placeholder: player uses the same for now
+    // BG -> palette slot 0:
+    ppu.palette_table[0][0] = bg_palette_rgba[0];
+    ppu.palette_table[0][1] = bg_palette_rgba[1];
+    ppu.palette_table[0][2] = bg_palette_rgba[2];
+    ppu.palette_table[0][3] = bg_palette_rgba[3];
 
-    // 5) Make a static background using your first tiles.
-    //    Replace this with a CSV map later if you like.
+    // // Characters -> palette slot 7:
+    // ppu.palette_table[7][0] = char_palette_rgba[0];
+    // ppu.palette_table[7][1] = char_palette_rgba[1];
+    // ppu.palette_table[7][2] = char_palette_rgba[2];
+    // ppu.palette_table[7][3] = char_palette_rgba[3];
+
+    // // Obstacles -> palette slot 6:
+    // ppu.palette_table[6][0] = obst_palette_rgba[0];
+    // ppu.palette_table[6][1] = obst_palette_rgba[1];
+    // ppu.palette_table[6][2] = obst_palette_rgba[2];
+    // ppu.palette_table[6][3] = obst_palette_rgba[3];
+
+    // --- 5) Static background ---
     for (uint32_t y = 0; y < PPU466::BackgroundHeight; ++y) {
         for (uint32_t x = 0; x < PPU466::BackgroundWidth; ++x) {
-            // simple checker using the first few tiles so you can see something:
-            uint8_t tile_idx = uint8_t( ( (x/2) + (y/2) ) % std::max<uint32_t>(1, packed.tiles_w) ); //?? how does this math work
-            ppu.background[x + PPU466::BackgroundWidth * y] = tile_idx; // tile index
+            // This just cycles across the first row of your bg_tiles.png so you can see them:
+            // uint8_t idx_in_row = uint8_t( ((x/2) + (y/2)) % std::max<uint32_t>(1, bg_packed.tiles_w) );
+            // ppu.background[x + PPU466::BackgroundWidth * y] = uint8_t(bg_tile_base + idx_in_row);
+			ppu.background[x + PPU466::BackgroundWidth * y] = 0; // blank everywhere
         }
     }
 
-    // 6) Put the player sprite on screen using some tile index you own (e.g., 0).
-    ppu.sprites[0].index = 32;     // choose a visible tile from your sheet
-    ppu.sprites[0].attributes = 7; // palette slot 7 (copied from 0 above)
+	// --- Wall tiles
+	// choose which specific wall tile to use:
+    const uint8_t wall_tile_index = uint8_t(bg_tile_base); // first wall tile you uploaded
 
-    // Optionally set background color if you want:
-    ppu.background_color = glm::u8vec4(0,0,0,0xff);
+    // 5.1) Four borders of the viewport:
+    for (uint32_t x = 0; x < PPU466::BackgroundWidth; ++x) {
+        // top & bottom rows:
+        ppu.background[x + PPU466::BackgroundWidth * 0] = wall_tile_index;
+        ppu.background[x + PPU466::BackgroundWidth * (PPU466::BackgroundHeight - 1)] = wall_tile_index;
+    }
+    for (uint32_t y = 0; y < PPU466::BackgroundHeight; ++y) {
+        // left & right columns:
+        ppu.background[0 + PPU466::BackgroundWidth * y] = wall_tile_index;
+        ppu.background[(PPU466::BackgroundWidth - 1) + PPU466::BackgroundWidth * y] = wall_tile_index;
+    }
+
+    // 5.2) Fill the 10th row of tiles:
+    if (PPU466::BackgroundHeight > 10) {
+        const uint32_t y = 10; // 0-based "10th" row
+        for (uint32_t x = 0; x < PPU466::BackgroundWidth; ++x) {
+            ppu.background[x + PPU466::BackgroundWidth * y] = wall_tile_index;
+        }
+    }
+
+    // 5.3) Fill the 20th row of tiles:
+    if (PPU466::BackgroundHeight > 20) {
+        const uint32_t y = 20; // 0-based "20th" row
+        for (uint32_t x = 0; x < PPU466::BackgroundWidth; ++x) {
+            ppu.background[x + PPU466::BackgroundWidth * y] = wall_tile_index;
+        }
+    }
+
+    // --- 6) Player sprite: keep palette 7 and use the first character tile at index 32 ---
+
+    ppu.sprites[0].index = uint8_t(char_tile_base); // 32
+    ppu.sprites[0].attributes = 7;                  // character palette
+
+    // Optional background color (kept from your version):
+    ppu.background_color = glm::u8vec4(0x11,0x0a,0x18,0xff);
 }
-
 
 
 /* "~"" indicates that this function is called automatically when a PlayMode object is destroyed, 
@@ -233,12 +318,14 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	//--- set ppu state based on game state ---
 
 	//background color will be some hsv-like fade:
-	ppu.background_color = glm::u8vec4(
-		std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 0.0f / 3.0f) ) ) ))),
-		std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 1.0f / 3.0f) ) ) ))),
-		std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 2.0f / 3.0f) ) ) ))),
-		0xff
-	);
+	// ppu.background_color = glm::u8vec4(
+	// 	std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 0.0f / 3.0f) ) ) ))),
+	// 	std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 1.0f / 3.0f) ) ) ))),
+	// 	std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 2.0f / 3.0f) ) ) ))),
+	// 	0xff
+	// );
+
+	ppu.background_color = glm::u8vec4(0x11,0x0a,0x18,0xff);
 
 	// //tilemap gets recomputed every frame as some weird plasma thing:
 	// //NOTE: don't do this in your game! actually make a map or something :-)
@@ -249,9 +336,12 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	// 	}
 	// }
 
-	//background scroll:
-	ppu.background_position.x = int32_t(-0.5f * player_at.x);
-	ppu.background_position.y = int32_t(-0.5f * player_at.y);
+	// //background scroll:
+	// ppu.background_position.x = int32_t(-0.5f * player_at.x);
+	// ppu.background_position.y = int32_t(-0.5f * player_at.y);
+
+	ppu.background_position.x = 0;
+    ppu.background_position.y = 0;
 
 	//player sprite:
 	ppu.sprites[0].x = int8_t(player_at.x);
@@ -264,7 +354,7 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		float amt = (i + 2.0f * background_fade) / 62.0f;
 		ppu.sprites[i].x = int8_t(0.5f * float(PPU466::ScreenWidth) + std::cos( 2.0f * M_PI * amt * 5.0f + 0.01f * player_at.x) * 0.4f * float(PPU466::ScreenWidth));
 		ppu.sprites[i].y = int8_t(0.5f * float(PPU466::ScreenHeight) + std::sin( 2.0f * M_PI * amt * 3.0f + 0.01f * player_at.y) * 0.4f * float(PPU466::ScreenWidth));
-		ppu.sprites[i].index = 32;
+		ppu.sprites[i].index = 64;
 		ppu.sprites[i].attributes = 6;
 		if (i % 2) ppu.sprites[i].attributes |= 0x80; //'behind' bit
 	}
