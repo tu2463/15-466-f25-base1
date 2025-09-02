@@ -19,6 +19,8 @@ static uint8_t s_door_up_red    = 0;
 static uint8_t s_door_down_red  = 0;
 static uint8_t s_door_up_grey   = 0;
 static uint8_t s_door_down_grey = 0;
+static uint8_t s_char_red_idx = 0;       // will be set in the constructor
+static uint8_t s_char_red_palette = 5;   // your red character palette slot
 
 PlayMode::PlayMode() {
     // --- 1) Define palettes from your hex colors ---
@@ -81,12 +83,15 @@ PlayMode::PlayMode() {
     const size_t bg_copy_count   = std::min(bg_packed.tiles.size(),   ppu.tile_table.size() - bg_tile_base);
     const size_t char1_copy_count   = std::min(char1_packed.tiles.size(),   ppu.tile_table.size() - char1_tile_base);
     const size_t char2_copy_count   = std::min(char2_packed.tiles.size(),   ppu.tile_table.size() - char2_tile_base);
-    // const size_t obst_copy_count = std::min(obst_packed.tiles.size(), ppu.tile_table.size() - obst_tile_base);
 
     for (size_t i = 0; i < bg_copy_count;   ++i) ppu.tile_table[bg_tile_base   + i] = bg_packed.tiles[i];
     for (size_t i = 0; i < char1_copy_count;   ++i) ppu.tile_table[char1_tile_base   + i] = char1_packed.tiles[i];
     for (size_t i = 0; i < char2_copy_count;   ++i) ppu.tile_table[char2_tile_base   + i] = char2_packed.tiles[i];
-    // for (size_t i = 0; i < obst_copy_count; ++i) ppu.tile_table[obst_tile_base + i] = obst_packed.tiles[i];
+	
+	// first red character tile from the red sheet:
+	s_char_red_idx = uint8_t(char2_tile_base + 0);
+	// palette for that red character:
+	s_char_red_palette = 5;
 
 	// make tile 0 be a fully transparent tile (so solid background color shows):
     PPU466::Tile blank{};
@@ -488,6 +493,24 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		}
 		// (optional) clear any remaining sprite slots if you previously used them
 	}
+
+	// add a red character sprite at the bottom, centered:
+	{
+		// use the last hardware sprite slot to avoid colliding with doors (0 is player, 1.. are doors)
+		const size_t red_char_slot = 63;
+
+		// center horizontally for an 8x8 tile; bottom row (y = 0 in PPU coordinates)
+		const int center_x = int((PPU466::ScreenWidth - 8) / 2);
+
+		const int row_from_bottom = 5;
+		const int bottom_y = (row_from_bottom - 1) * 8;
+
+		ppu.sprites[red_char_slot].x = int8_t(center_x);
+		ppu.sprites[red_char_slot].y = int8_t(bottom_y);
+		ppu.sprites[red_char_slot].index = s_char_red_idx;       // e.g., 20
+		ppu.sprites[red_char_slot].attributes = s_char_red_palette; // 5
+	}
+
 
 	//--- actually draw ---
 	ppu.draw(drawable_size);
