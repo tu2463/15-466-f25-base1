@@ -54,29 +54,44 @@ PlayMode::PlayMode() {
         bg_palette_rgba
     );
 
-    // Pack exactly one tile for each character from the same PNG.
-	// First character is at tile (0,0); second character at tile (1,0).
-	PPU466::Tile char1 = Sprites::pack_png_single_tile(
-		data_path("assets/char_tiles.png"), char1_palette_rgba, /*tile_x=*/0, /*tile_y=*/0, /*flip_y=*/true);
-	PPU466::Tile char2 = Sprites::pack_png_single_tile(
-		data_path("assets/char_tiles.png"), char2_palette_rgba, /*tile_x=*/1, /*tile_y=*/0, /*flip_y=*/true);
+	auto char1_packed = Sprites::pack_png_tileset(
+		data_path("assets/char_red_tiles.png"),
+        char2_palette_rgba
+    );
+
+	auto char2_packed = Sprites::pack_png_tileset(
+        data_path("assets/char_red_tiles.png"),
+        char2_palette_rgba
+    );
+
+    // // Pack exactly one tile for each character from the same PNG.
+	// // First character is at tile (0,0); second character at tile (1,0).
+	// PPU466::Tile char1 = Sprites::pack_png_single_tile(
+	// 	data_path("assets/char_tiles.png"), char1_palette_rgba, /*tile_x=*/0, /*tile_y=*/0, /*flip_y=*/true);
+	// PPU466::Tile char2 = Sprites::pack_png_single_tile(
+	// 	data_path("assets/char_tiles.png"), char2_palette_rgba, /*tile_x=*/1, /*tile_y=*/0, /*flip_y=*/true);
 
     // auto obst_packed = Sprites::pack_png_tileset(
     //     data_path("assets/obst_tiles.png"),
     //     obst_palette_rgba
     // );
 
-    // --- 3) Upload into fixed tile table ranges (0, 32, 64) ---
+    // --- 3) Upload into fixed tile table ranges ---
     //    Should truncate for Game1 if there are. >256 tiles.
-    const size_t bg_tile_base   = 1; // walls begin at tile index 1 (tile 0 will be blank)
-    const size_t char_tile_base = 32; // keep 32 so draw() can continue using index=32
+    const size_t bg_tile_base   = 1;
+    const size_t char1_tile_base = 10;
+    const size_t char2_tile_base = 20;
     // const size_t obst_tile_base = 64;
 
 	// calculates the number of tiles to copy into tile_table, ensuring it does not exceed the size of tile_table
     const size_t bg_copy_count   = std::min(bg_packed.tiles.size(),   ppu.tile_table.size() - bg_tile_base);
+    const size_t char1_copy_count   = std::min(char1_packed.tiles.size(),   ppu.tile_table.size() - char1_tile_base);
+    const size_t char2_copy_count   = std::min(char2_packed.tiles.size(),   ppu.tile_table.size() - char2_tile_base);
     // const size_t obst_copy_count = std::min(obst_packed.tiles.size(), ppu.tile_table.size() - obst_tile_base);
 
     for (size_t i = 0; i < bg_copy_count;   ++i) ppu.tile_table[bg_tile_base   + i] = bg_packed.tiles[i];
+    for (size_t i = 0; i < char1_copy_count;   ++i) ppu.tile_table[char1_tile_base   + i] = char1_packed.tiles[i];
+    for (size_t i = 0; i < char2_copy_count;   ++i) ppu.tile_table[char2_tile_base   + i] = char2_packed.tiles[i];
     // for (size_t i = 0; i < obst_copy_count; ++i) ppu.tile_table[obst_tile_base + i] = obst_packed.tiles[i];
 
 	// make tile 0 be a fully transparent tile (so solid background color shows):
@@ -84,8 +99,8 @@ PlayMode::PlayMode() {
     for (int r = 0; r < 8; ++r) { blank.bit0[r] = 0; blank.bit1[r] = 0; }
     ppu.tile_table[0] = blank;
 
-	ppu.tile_table[char_tile_base + 0] = char1; // index 32
-	ppu.tile_table[char_tile_base + 1] = char2; // index 33
+	// ppu.tile_table[char_tile_base + 0] = char1;
+	// ppu.tile_table[char_tile_base + 1] = char2;
 
     // --- 4) Install palettes into PPU slots (BG=0, Characters=7, Obstacles=6) ---
 	// NOTE that packed.palette is exactly the same as my_palette, refer to the pack_png_tileset function - is it correct?
@@ -178,6 +193,19 @@ PlayMode::PlayMode() {
 
     // Optional background color (kept from your version):
     ppu.background_color = glm::u8vec4(0x11,0x0a,0x18,0xff);
+
+	// Start the player at (row 5, col 16) measured from TOP-LEFT, once:
+	{
+		const uint32_t VISIBLE_H = PPU466::ScreenHeight / 8;
+		const int tile_col_from_left = 16;
+		const int tile_row_from_top  = 5;
+
+		const int start_x = tile_col_from_left * 8;
+		const int start_y = int((VISIBLE_H - (tile_row_from_top + 1)) * 8); // 1 tile tall
+
+		player_at.x = float(start_x);
+		player_at.y = float(start_y);
+	}
 }
 
 
@@ -226,78 +254,120 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 }
 
 void PlayMode::update(float elapsed) {
+    constexpr float PlayerSpeed = 60.0f;
+    constexpr int   TileSize    = 8;
 
-	//slowly rotates through [0,1):
-	// (will be used to set background color)
-	background_fade += elapsed / 10.0f;
-	background_fade -= std::floor(background_fade);
+    // desired motion this frame:
+    float dx = 0.0f, dy = 0.0f;
+    if (left.pressed)  {
+		dx -= PlayerSpeed * elapsed; 
+		// printf("left, dx: %f\n", dx);
+	}
+    if (right.pressed) {
+		dx += PlayerSpeed * elapsed; 
+		// printf("right, dx: %f\n", dx);
+	}
+    if (down.pressed) {
+		dy -= PlayerSpeed * elapsed;
+		// printf("down, dy: %f\n", dy);
+	}
+    if (up.pressed)    {
+		dy += PlayerSpeed * elapsed;
+		// printf("up, dy: %f\n", dy);
+	}
 
-	constexpr float PlayerSpeed = 30.0f;
-	if (left.pressed) player_at.x -= PlayerSpeed * elapsed;
-	if (right.pressed) player_at.x += PlayerSpeed * elapsed;
-	if (down.pressed) player_at.y -= PlayerSpeed * elapsed;
-	if (up.pressed) player_at.y += PlayerSpeed * elapsed;
+    // visible viewport in tiles (your walls live here):
+    const int VISIBLE_W = int(PPU466::ScreenWidth  / TileSize);
+    const int VISIBLE_H = int(PPU466::ScreenHeight / TileSize);
 
-	//reset button press counters:
-	left.downs = 0;
-	right.downs = 0;
-	up.downs = 0;
-	down.downs = 0;
+    // helper: treat outside the viewport as solid; inside: solid if background tile != 0
+    auto is_solid_tile = [&](int tx, int ty) -> bool {
+        if (tx < 0 || ty < 0 || tx >= VISIBLE_W || ty >= VISIBLE_H) return true;
+        uint8_t idx = ppu.background[tx + PPU466::BackgroundWidth * ty];
+        return (idx != 0); // you reserved tile 0 as blank; all others are walls for now
+    };
+
+    // --- move along X, then resolve collisions ---
+    if (dx != 0.0f) {
+        float new_x = player_at.x + dx;
+        // compute the rows overlapped at current Y:
+        int y0 = int(std::floor(player_at.y / float(TileSize)));
+        int y1 = int(std::floor((player_at.y + (TileSize - 1)) / float(TileSize)));
+
+        if (dx > 0.0f) {
+            int right_edge = int(std::floor((new_x + (TileSize - 1)) / float(TileSize)));
+            bool blocked = false;
+            for (int ty = y0; ty <= y1; ++ty) {
+                if (is_solid_tile(right_edge, ty)) { blocked = true; break; }
+            }
+            if (blocked) {
+                // place flush-left against the blocking tile:
+                new_x = float(right_edge * TileSize - TileSize);
+            }
+        } else { // dx < 0
+            int left_edge = int(std::floor(new_x / float(TileSize)));
+            bool blocked = false;
+            for (int ty = y0; ty <= y1; ++ty) {
+                if (is_solid_tile(left_edge, ty)) { blocked = true; break; }
+            }
+            if (blocked) {
+                // place flush-right against the blocking tile:
+                new_x = float((left_edge + 1) * TileSize);
+            }
+        }
+        player_at.x = new_x;
+		// printf("player_at.x after collision: %f\n", player_at.x);
+    }
+
+    // --- move along Y, then resolve collisions ---
+    if (dy != 0.0f) {
+        float new_y = player_at.y + dy;
+        // compute the columns overlapped at current X:
+        int x0 = int(std::floor(player_at.x / float(TileSize)));
+        int x1 = int(std::floor((player_at.x + (TileSize - 1)) / float(TileSize)));
+
+        if (dy > 0.0f) {
+            int top_edge = int(std::floor((new_y + (TileSize - 1)) / float(TileSize)));
+            bool blocked = false;
+            for (int tx = x0; tx <= x1; ++tx) {
+                if (is_solid_tile(tx, top_edge)) { blocked = true; break; }
+            }
+            if (blocked) {
+                // place flush-below the blocking tile:
+                new_y = float(top_edge * TileSize - TileSize);
+            }
+        } else { // dy < 0
+            int bottom_edge = int(std::floor(new_y / float(TileSize)));
+            bool blocked = false;
+            for (int tx = x0; tx <= x1; ++tx) {
+                if (is_solid_tile(tx, bottom_edge)) { blocked = true; break; }
+            }
+            if (blocked) {
+                // place flush-above the blocking tile:
+                new_y = float((bottom_edge + 1) * TileSize);
+            }
+        }
+        player_at.y = new_y;
+		// printf("player_at.y after collision: %f\n", player_at.y);
+    }
+
+    // reset button press counters (keep your original behavior):
+    left.downs = right.downs = up.downs = down.downs = 0;
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	//--- set ppu state based on game state ---
 
-	//background color will be some hsv-like fade:
-	// ppu.background_color = glm::u8vec4(
-	// 	std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 0.0f / 3.0f) ) ) ))),
-	// 	std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 1.0f / 3.0f) ) ) ))),
-	// 	std::min(255,std::max(0,int32_t(255 * 0.5f * (0.5f + std::sin( 2.0f * M_PI * (background_fade + 2.0f / 3.0f) ) ) ))),
-	// 	0xff
-	// );
-
 	ppu.background_color = glm::u8vec4(0x11,0x0a,0x18,0xff);
-
-	// //tilemap gets recomputed every frame as some weird plasma thing:
-	// //NOTE: don't do this in your game! actually make a map or something :-)
-	// for (uint32_t y = 0; y < PPU466::BackgroundHeight; ++y) {
-	// 	for (uint32_t x = 0; x < PPU466::BackgroundWidth; ++x) {
-	// 		//TODO: make weird plasma thing
-	// 		ppu.background[x+PPU466::BackgroundWidth*y] = ((x+y)%16);
-	// 	}
-	// }
-
-	// //background scroll:
-	// ppu.background_position.x = int32_t(-0.5f * player_at.x);
-	// ppu.background_position.y = int32_t(-0.5f * player_at.y);
 
 	ppu.background_position.x = 0;
     ppu.background_position.y = 0;
 
 	//player sprite:
-	// ppu.sprites[0].x = int8_t(player_at.x);
-	// ppu.sprites[0].y = int8_t(player_at.y);
-	// ppu.sprites[0].index = 32;
-	// ppu.sprites[0].attributes = 7;
-
-	// --- draw first character as a 3x3 meta-sprite at (row 5, col 16) counted from TOP-LEFT ---
-	{
-		const uint32_t VISIBLE_H = PPU466::ScreenHeight / 8;
-		const int tile_col_from_left = 16;
-		const int tile_row_from_top  = 5;
-
-		const int base_x = tile_col_from_left * 8;
-		const int base_y = int((VISIBLE_H - (tile_row_from_top + 1)) * 8); // +1 because sprite is 1 tile tall
-
-		player_at.x = float(base_x);
-    	player_at.y = float(base_y);
-
-		ppu.sprites[0].x = int8_t(std::round(player_at.x));
-		ppu.sprites[0].y = int8_t(std::round(player_at.y));
-		ppu.sprites[0].index = 32; // char_tile_base + 0
-		ppu.sprites[0].attributes = 7; // palette slot for first character
-	}
-
+	ppu.sprites[0].x = int8_t(int(player_at.x + 0.5f));
+	ppu.sprites[0].y = int8_t(int(player_at.y + 0.5f));
+	ppu.sprites[0].index = 10;     // first character tile
+	ppu.sprites[0].attributes = 7; // character palette
 
 	// //some other misc sprites:
 	// for (uint32_t i = 1; i < 63; ++i) {
