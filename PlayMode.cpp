@@ -481,19 +481,19 @@ void PlayMode::update(float elapsed) {
 
 					// move ±3 rows depending on up/down
 					if (door.is_up) {
-						printf("Triggering UP door at (%d,%d)\n", door.x, door.y);
+						// printf("Triggering UP door at (%d,%d)\n", door.x, door.y);
 						player_at.y -= 4 * TileSize;
 					} else {
-						printf("Triggering DOWN door at (%d,%d)\n", door.x, door.y);
+						// printf("Triggering DOWN door at (%d,%d)\n", door.x, door.y);
 						player_at.y += 4 * TileSize;
 					}
 
 					// change to the paired door’s color
 					if (door.paired_color == DoorColor::Grey) {
 						player_color = PlayerColor::Grey;
-						printf("Player color changed to GREY\n");
+						// printf("Player color changed to GREY\n");
 					} else {
-						printf("Player color changed to RED\n");
+						// printf("Player color changed to RED\n");
 						player_color = PlayerColor::Red;
 					}
 
