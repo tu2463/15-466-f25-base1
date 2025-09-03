@@ -11,6 +11,26 @@
 #include <random>
 
 // Credit: Used ChatGPT for assistance
+// --- success / win flow ---
+enum class GamePhase { Playing, WinWait, WinSlide };
+static GamePhase g_phase = GamePhase::Playing;
+
+const int center_x = int((PPU466::ScreenWidth - 8) / 2);
+const int row_from_bottom = 5;
+const int bottom_y = (row_from_bottom - 1) * 8;
+static glm::vec2 s_target_red_pos = glm::vec2({center_x, bottom_y}); // bottom red character world pos
+
+static constexpr float kWinDelaySeconds   = 1.0f;  // pause before sliding
+static constexpr float kSlideStepSeconds  = 0.25f;  // move cadence
+static constexpr int   kSlideStepPixels   = 8;     // 1 column
+
+static float g_win_wait_remaining = 0.0f;
+static float g_slide_accum = 0.0f;
+
+static bool g_player_hidden = false; // hide once off-screen
+static bool g_target_hidden = false;
+
+// --- door  ---
 enum class DoorColor { Grey, Red };
 
 struct DoorInstance {
@@ -341,147 +361,208 @@ void PlayMode::update(float elapsed) {
     constexpr float PlayerSpeed = 90.0f;
     constexpr int   TileSize    = 8;
 
-    // desired motion this frame:
-    float dx = 0.0f, dy = 0.0f;
-    if (left.pressed)  {
-		dx -= PlayerSpeed * elapsed; 
-		// printf("left, dx: %f\n", dx);
-	}
-    if (right.pressed) {
-		dx += PlayerSpeed * elapsed; 
-		// printf("right, dx: %f\n", dx);
-	}
-    if (down.pressed) {
-		dy -= PlayerSpeed * elapsed;
-		// printf("down, dy: %f\n", dy);
-	}
-    if (up.pressed)    {
-		dy += PlayerSpeed * elapsed;
-		// printf("up, dy: %f\n", dy);
-	}
+	// --------- Playing phase: normal movement + collisions + doors ----------
+    if (g_phase == GamePhase::Playing) {
+		// desired motion this frame:
+		float dx = 0.0f, dy = 0.0f;
+		if (left.pressed)  {
+			dx -= PlayerSpeed * elapsed; 
+			// printf("left, dx: %f\n", dx);
+		}
+		if (right.pressed) {
+			dx += PlayerSpeed * elapsed; 
+			// printf("right, dx: %f\n", dx);
+		}
+		if (down.pressed) {
+			dy -= PlayerSpeed * elapsed;
+			// printf("down, dy: %f\n", dy);
+		}
+		if (up.pressed)    {
+			dy += PlayerSpeed * elapsed;
+			// printf("up, dy: %f\n", dy);
+		}
 
-    // visible viewport in tiles (your walls live here):
-    const int VISIBLE_W = int(PPU466::ScreenWidth  / TileSize);
-    const int VISIBLE_H = int(PPU466::ScreenHeight / TileSize);
+		// visible viewport in tiles (your walls live here):
+		const int VISIBLE_W = int(PPU466::ScreenWidth  / TileSize);
+		const int VISIBLE_H = int(PPU466::ScreenHeight / TileSize);
 
-    // helper: treat outside the viewport as solid; inside: solid if background tile != 0
-    auto is_solid_tile = [&](int tx, int ty) -> bool {
-        if (tx < 0 || ty < 0 || tx >= VISIBLE_W || ty >= VISIBLE_H) return true;
-        uint8_t idx = ppu.background[tx + PPU466::BackgroundWidth * ty];
-        return (idx != 0); // you reserved tile 0 as blank; all others are walls for now
-    };
+		// helper: treat outside the viewport as solid; inside: solid if background tile != 0
+		auto is_solid_tile = [&](int tx, int ty) -> bool {
+			if (tx < 0 || ty < 0 || tx >= VISIBLE_W || ty >= VISIBLE_H) return true;
+			uint8_t idx = ppu.background[tx + PPU466::BackgroundWidth * ty];
+			return (idx != 0); // you reserved tile 0 as blank; all others are walls for now
+		};
 
-    // --- move along X, then resolve collisions ---
-    if (dx != 0.0f) {
-        float new_x = player_at.x + dx;
-        // compute the rows overlapped at current Y:
-        int y0 = int(std::floor(player_at.y / float(TileSize)));
-        int y1 = int(std::floor((player_at.y + (TileSize - 1)) / float(TileSize)));
+		// --- move along X, then resolve collisions ---
+		if (dx != 0.0f) {
+			float new_x = player_at.x + dx;
+			// compute the rows overlapped at current Y:
+			int y0 = int(std::floor(player_at.y / float(TileSize)));
+			int y1 = int(std::floor((player_at.y + (TileSize - 1)) / float(TileSize)));
 
-        if (dx > 0.0f) {
-            int right_edge = int(std::floor((new_x + (TileSize - 1)) / float(TileSize)));
-            bool blocked = false;
-            for (int ty = y0; ty <= y1; ++ty) {
-                if (is_solid_tile(right_edge, ty)) { blocked = true; break; }
-            }
-            if (blocked) {
-                // place flush-left against the blocking tile:
-                new_x = float(right_edge * TileSize - TileSize);
-            }
-        } else { // dx < 0
-            int left_edge = int(std::floor(new_x / float(TileSize)));
-            bool blocked = false;
-            for (int ty = y0; ty <= y1; ++ty) {
-                if (is_solid_tile(left_edge, ty)) { blocked = true; break; }
-            }
-            if (blocked) {
-                // place flush-right against the blocking tile:
-                new_x = float((left_edge + 1) * TileSize);
-            }
-        }
-        player_at.x = new_x;
-		// printf("player_at.x after collision: %f\n", player_at.x);
-    }
-
-    // --- move along Y, then resolve collisions ---
-    if (dy != 0.0f) {
-        float new_y = player_at.y + dy;
-        // compute the columns overlapped at current X:
-        int x0 = int(std::floor(player_at.x / float(TileSize)));
-        int x1 = int(std::floor((player_at.x + (TileSize - 1)) / float(TileSize)));
-
-        if (dy > 0.0f) {
-            int top_edge = int(std::floor((new_y + (TileSize - 1)) / float(TileSize)));
-            bool blocked = false;
-            for (int tx = x0; tx <= x1; ++tx) {
-                if (is_solid_tile(tx, top_edge)) { blocked = true; break; }
-            }
-            if (blocked) {
-                // place flush-below the blocking tile:
-                new_y = float(top_edge * TileSize - TileSize);
-            }
-        } else { // dy < 0
-            int bottom_edge = int(std::floor(new_y / float(TileSize)));
-            bool blocked = false;
-            for (int tx = x0; tx <= x1; ++tx) {
-                if (is_solid_tile(tx, bottom_edge)) { blocked = true; break; }
-            }
-            if (blocked) {
-                // place flush-above the blocking tile:
-                new_y = float((bottom_edge + 1) * TileSize);
-            }
-        }
-        player_at.y = new_y;
-		// printf("player_at.y after collision: %f\n", player_at.y);
-    }
-
-    // reset button press counters (keep your original behavior):
-    left.downs = right.downs = up.downs = down.downs = 0;
-
-	// ---- door triggers: touching a door moves the player ±3 rows (from TOP-LEFT semantics) ----
-	{
-		constexpr int TileSize = 8;
-		// check overlap with any door sprite (each 8x8)
-		for (auto const &door : g_door_sprites) {
-			bool overlap = (player_at.x < door.x + TileSize &&
-							player_at.x + TileSize > door.x &&
-							player_at.y < door.y + TileSize &&
-							player_at.y + TileSize > door.y);
-
-			if (!overlap) continue;
-
-			// check if player's current color matches this door's self color
-			PlayerColor as_player_color = (player_color == PlayerColor::Grey) ? PlayerColor::Grey : PlayerColor::Red;
-			DoorColor as_door_self = door.self_color;
-
-			if ((as_player_color == PlayerColor::Grey && as_door_self == DoorColor::Grey) ||
-				(as_player_color == PlayerColor::Red && as_door_self == DoorColor::Red)) {
-
-				// move ±3 rows depending on up/down
-				if (door.is_up) {
-					printf("Triggering UP door at (%d,%d)\n", door.x, door.y);
-					player_at.y -= 4 * TileSize;
-				} else {
-					printf("Triggering DOWN door at (%d,%d)\n", door.x, door.y);
-					player_at.y += 4 * TileSize;
+			if (dx > 0.0f) {
+				int right_edge = int(std::floor((new_x + (TileSize - 1)) / float(TileSize)));
+				bool blocked = false;
+				for (int ty = y0; ty <= y1; ++ty) {
+					if (is_solid_tile(right_edge, ty)) { blocked = true; break; }
 				}
-
-				// change to the paired door’s color
-				if (door.paired_color == DoorColor::Grey) {
-					player_color = PlayerColor::Grey;
-					printf("Player color changed to GREY\n");
-				} else {
-					printf("Player color changed to RED\n");
-					player_color = PlayerColor::Red;
+				if (blocked) {
+					// place flush-left against the blocking tile:
+					new_x = float(right_edge * TileSize - TileSize);
 				}
+			} else { // dx < 0
+				int left_edge = int(std::floor(new_x / float(TileSize)));
+				bool blocked = false;
+				for (int ty = y0; ty <= y1; ++ty) {
+					if (is_solid_tile(left_edge, ty)) { blocked = true; break; }
+				}
+				if (blocked) {
+					// place flush-right against the blocking tile:
+					new_x = float((left_edge + 1) * TileSize);
+				}
+			}
+			player_at.x = new_x;
+			// printf("player_at.x after collision: %f\n", player_at.x);
+		}
 
-				break; // only trigger one door per frame
+		// --- move along Y, then resolve collisions ---
+		if (dy != 0.0f) {
+			float new_y = player_at.y + dy;
+			// compute the columns overlapped at current X:
+			int x0 = int(std::floor(player_at.x / float(TileSize)));
+			int x1 = int(std::floor((player_at.x + (TileSize - 1)) / float(TileSize)));
+
+			if (dy > 0.0f) {
+				int top_edge = int(std::floor((new_y + (TileSize - 1)) / float(TileSize)));
+				bool blocked = false;
+				for (int tx = x0; tx <= x1; ++tx) {
+					if (is_solid_tile(tx, top_edge)) { blocked = true; break; }
+				}
+				if (blocked) {
+					// place flush-below the blocking tile:
+					new_y = float(top_edge * TileSize - TileSize);
+				}
+			} else { // dy < 0
+				int bottom_edge = int(std::floor(new_y / float(TileSize)));
+				bool blocked = false;
+				for (int tx = x0; tx <= x1; ++tx) {
+					if (is_solid_tile(tx, bottom_edge)) { blocked = true; break; }
+				}
+				if (blocked) {
+					// place flush-above the blocking tile:
+					new_y = float((bottom_edge + 1) * TileSize);
+				}
+			}
+			player_at.y = new_y;
+			// printf("player_at.y after collision: %f\n", player_at.y);
+		}
+
+		// reset button press counters (keep your original behavior):
+		left.downs = right.downs = up.downs = down.downs = 0;
+
+		// ---- door triggers: touching a door moves the player ±3 rows (from TOP-LEFT semantics) ----
+		{
+			constexpr int TileSize = 8;
+			// check overlap with any door sprite (each 8x8)
+			for (auto const &door : g_door_sprites) {
+				bool overlap = (player_at.x < door.x + TileSize &&
+								player_at.x + TileSize > door.x &&
+								player_at.y < door.y + TileSize &&
+								player_at.y + TileSize > door.y);
+
+				if (!overlap) continue;
+
+				// check if player's current color matches this door's self color
+				PlayerColor as_player_color = (player_color == PlayerColor::Grey) ? PlayerColor::Grey : PlayerColor::Red;
+				DoorColor as_door_self = door.self_color;
+
+				if ((as_player_color == PlayerColor::Grey && as_door_self == DoorColor::Grey) ||
+					(as_player_color == PlayerColor::Red && as_door_self == DoorColor::Red)) {
+
+					// move ±3 rows depending on up/down
+					if (door.is_up) {
+						printf("Triggering UP door at (%d,%d)\n", door.x, door.y);
+						player_at.y -= 4 * TileSize;
+					} else {
+						printf("Triggering DOWN door at (%d,%d)\n", door.x, door.y);
+						player_at.y += 4 * TileSize;
+					}
+
+					// change to the paired door’s color
+					if (door.paired_color == DoorColor::Grey) {
+						player_color = PlayerColor::Grey;
+						printf("Player color changed to GREY\n");
+					} else {
+						printf("Player color changed to RED\n");
+						player_color = PlayerColor::Red;
+					}
+
+					break; // only trigger one door per frame
+				}
 			}
 		}
+
+		// --- success trigger: red player touches target red character ---
+		if (player_color == PlayerColor::Red)
+		{
+			bool overlap_target =
+				(player_at.x < s_target_red_pos.x + TileSize) &&
+				(player_at.x + TileSize > s_target_red_pos.x) &&
+				(player_at.y < s_target_red_pos.y + TileSize) &&
+				(player_at.y + TileSize > s_target_red_pos.y);
+
+			if (overlap_target)
+			{
+				// enter win wait phase
+				g_phase = GamePhase::WinWait;
+				g_win_wait_remaining = kWinDelaySeconds;
+
+				// stop controls immediately
+				left.pressed = right.pressed = up.pressed = down.pressed = false;
+				left.downs = right.downs = up.downs = down.downs = 0;
+			}
+			return;
+		}
 	}
+
+	// --------- WinWait phase: freeze for 1 second ----------
+    if (g_phase == GamePhase::WinWait) {
+        g_win_wait_remaining -= elapsed;
+        // lock out controls
+        left.pressed = right.pressed = up.pressed = down.pressed = false;
+        left.downs = right.downs = up.downs = down.downs = 0;
+
+        if (g_win_wait_remaining <= 0.0f) {
+            g_phase = GamePhase::WinSlide;
+            g_slide_accum = 0.0f;
+        }
+        return;
+    }
+
+    // --------- WinSlide phase: move both right 1 col / 0.5s until off-screen ----------
+    if (g_phase == GamePhase::WinSlide) {
+        g_slide_accum += elapsed;
+        while (g_slide_accum >= kSlideStepSeconds) {
+            g_slide_accum -= kSlideStepSeconds;
+
+            player_at.x       += float(kSlideStepPixels);
+            s_target_red_pos.x += float(kSlideStepPixels);
+
+            // hide once off right edge (prevents wrap visuals)
+            if (player_at.x >= float(PPU466::ScreenWidth))  g_player_hidden = true;
+            if (s_target_red_pos.x >= float(PPU466::ScreenWidth)) g_target_hidden = true;
+        }
+
+        // controls remain disabled
+        left.pressed = right.pressed = up.pressed = down.pressed = false;
+        left.downs = right.downs = up.downs = down.downs = 0;
+
+        return;
+    }
 }
 
-void PlayMode::draw(glm::uvec2 const &drawable_size) {
+void PlayMode::draw(glm::uvec2 const &drawable_size)
+{
 	//--- set ppu state based on game state ---
 
 	ppu.background_color = glm::u8vec4(0x11,0x0a,0x18,0xff);
@@ -496,11 +577,17 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		uint8_t idx = (player_color == PlayerColor::Grey) ? s_char_grey_idx : s_char_red_idx;
 		uint8_t pal = (player_color == PlayerColor::Grey) ? s_char_grey_palette : s_char_red_palette;
 
-		ppu.sprites[player_slot].x = int8_t(int(player_at.x));
-		ppu.sprites[player_slot].y = int8_t(int(player_at.y));
+		int draw_x = int(player_at.x);
+		int draw_y = int(player_at.y);
+
+		if (g_player_hidden) draw_y = 255;
+
+		ppu.sprites[player_slot].x = int8_t(draw_x);
+		ppu.sprites[player_slot].y = int8_t(draw_y);
 		ppu.sprites[player_slot].index = idx;
 		ppu.sprites[player_slot].attributes = pal;
 	}
+
 
 	// draw door sprites starting at hardware sprite slot 1:
 	{
@@ -518,21 +605,19 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		// (optional) clear any remaining sprite slots if you previously used them
 	}
 
-	// target red character sprite
+	// target red character sprite (slot 63)
 	{
-		// use the last hardware sprite slot to avoid colliding with doors (0 is player, 1.. are doors)
 		const size_t red_char_slot = 63;
 
-		// center horizontally for an 8x8 tile; bottom row (y = 0 in PPU coordinates)
-		const int center_x = int((PPU466::ScreenWidth - 8) / 2);
+		int draw_x = int(s_target_red_pos.x);
+		int draw_y = int(s_target_red_pos.y);
 
-		const int row_from_bottom = 5;
-		const int bottom_y = (row_from_bottom - 1) * 8;
+		if (g_target_hidden) draw_y = 255; // NES-style 'offscreen'
 
-		ppu.sprites[red_char_slot].x = int8_t(center_x);
-		ppu.sprites[red_char_slot].y = int8_t(bottom_y);
-		ppu.sprites[red_char_slot].index = s_char_red_idx;       // e.g., 20
-		ppu.sprites[red_char_slot].attributes = s_char_red_palette; // 5
+		ppu.sprites[red_char_slot].x = int8_t(draw_x);
+		ppu.sprites[red_char_slot].y = int8_t(draw_y);
+		ppu.sprites[red_char_slot].index = s_char_red_idx;
+		ppu.sprites[red_char_slot].attributes = s_char_red_palette;
 	}
 
 
