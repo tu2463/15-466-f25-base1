@@ -1,9 +1,9 @@
-Join My Colored Friends
+Join My Colored Friend
 
 Author: Cheyu Tu
 
 Design:
-A grey little creature wants to turn red and join the red creature friend group. It discovers that the mysterious doors can change its color...
+A grey little creature wants make itself red so that it can make friends with the red little creature. It discovers that the doors can change its color...
 
 Screen Shot:
 
@@ -29,15 +29,12 @@ Clear ppu.background to tile 0 so the solid background_color shows, then place w
 5. Place sprites for player and props (doors):
 The player uses a character tile and is drawn from a live player_at position each frame. Doors are loaded as single 8×8 tiles, assigned a shared palette, and placed as sprites at specified (row, col) locations (1-based, from top-left). Door overlap triggers row±3 movement; solid-tile collision comes from the background map (non-zero tiles are solid). 
 
-WIP:
-- When player is red and reaches the target (the red character at the bottom), game success.
-
 Source files: they are in dist/assets
 
 How To Play:
 
-Control: use the arrow keys to control the little creature. T
-Goal: let the little creature reach the red creatures, and make sure that it becomes red when it reache them.
+Control: use the arrow keys to control the little creature.
+Goal: let the little creature reach the red creature at the bottom, and make sure that it becomes red when it reach it.
 
 This game was built with [NEST](NEST.md).
 
