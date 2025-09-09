@@ -39,3 +39,5 @@ Goal: let the little creature reach the red creature at the bottom, and make sur
 
 This game was built with [NEST](NEST.md).
 
+Base code for Game 1: http://graphics.cs.cmu.edu/courses/15-466-f25/game1.html
+
