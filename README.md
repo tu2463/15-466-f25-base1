@@ -1,4 +1,4 @@
-Join My Colored Friend
+Get to My Friend
 
 Author: Cheyu Tu
 
